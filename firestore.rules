@@ -23,9 +23,9 @@ service cloud.firestore {
     function invited(tree) { return verified() && email() in tree.inviteEmails; }
     function isMember(tree) { return signedIn() && (tree.ownerId == uid() || uid() in tree.memberUids || invited(tree)); }
     function canReadTree(tree) {
-      return (signedIn() && tree.ownerId == uid())
-        || (tree.hidden == false && (tree.publicRead == true || isMember(tree)))
-        || isAdmin();
+      return isAdmin()
+        || (tree.hidden == false && tree.publicRead == true)
+        || (notLocked() && (tree.ownerId == uid() || (tree.hidden == false && isMember(tree))));
     }
     // 'owner' | 'admin' | 'editor' | 'viewer' | 'none'
     function roleIn(treeId, tree) {

@@ -130,6 +130,7 @@ export default function TreePage() {
     guard('Đang tải lên đám mây…', async () => {
       const newId = await ops.uploadLocalTree(data, setBusy)
       toast('Đã tải cây lên đám mây. Bản trên thiết bị vẫn được giữ lại.')
+      setSheet('')
       nav(`/t/${newId}`)
     })
   const sendReport = () =>
