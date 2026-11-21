@@ -1,0 +1,117 @@
+rules_version = '2';
+
+// Gia Phả Thông Minh — Firestore security rules.
+// Trees are private: only the owner, invited e-mails, people who joined with the share link
+// and app admins can read them. Optional public read-only link per tree (publicRead).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+    function verified() { return signedIn() && request.auth.token.email_verified == true; }
+    function email() { return request.auth.token.email.lower(); }
+    function userPath() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function isDefaultAdmin() { return verified() && email() == 'virusphuoc@gmail.com'; }
+    function isAdmin() {
+      return signedIn() && (isDefaultAdmin() || (exists(userPath()) && get(userPath()).data.isAdmin == true));
+    }
+    function notLocked() {
+      return signedIn() && !(exists(userPath()) && get(userPath()).data.locked == true);
+    }
+
+    function treePath(treeId) { return /databases/$(database)/documents/trees/$(treeId); }
+    function joinPath(treeId) { return /databases/$(database)/documents/trees/$(treeId)/joins/$(request.auth.uid); }
+    function invited(tree) { return verified() && email() in tree.inviteEmails; }
+    function isMember(tree) { return signedIn() && (tree.ownerId == uid() || uid() in tree.memberUids || invited(tree)); }
+    function canReadTree(tree) {
+      return (signedIn() && tree.ownerId == uid())
+        || (tree.hidden == false && (tree.publicRead == true || isMember(tree)))
+        || isAdmin();
+    }
+    // 'owner' | 'admin' | 'editor' | 'viewer' | 'none'
+    function roleIn(treeId, tree) {
+      return tree.ownerId == uid() ? 'owner'
+        : (verified() && email() in tree.emailRoles) ? tree.emailRoles[email()]
+        : (uid() in tree.memberUids && exists(joinPath(treeId))) ? get(joinPath(treeId)).data.role
+        : 'none';
+    }
+    function canEditTree(treeId, tree) {
+      return notLocked() && (isAdmin() || (tree.hidden == false && roleIn(treeId, tree) in ['owner', 'admin', 'editor']));
+    }
+    function canManageTree(treeId, tree) {
+      return notLocked() && (isAdmin() || (tree.hidden == false && roleIn(treeId, tree) in ['owner', 'admin']));
+    }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+    match /users/{userId} {
+      allow read: if signedIn() && (uid() == userId || isAdmin());
+      allow create: if signedIn() && uid() == userId
+        && request.resource.data.isAdmin == false && request.resource.data.locked == false;
+      allow update: if signedIn() && (
+        (uid() == userId && !changed().hasAny(['isAdmin', 'locked']))
+        || (isAdmin() && changed().hasOnly(['isAdmin', 'locked'])));
+    }
+
+    match /trees/{treeId} {
+      allow read: if canReadTree(resource.data);
+      allow create: if notLocked()
+        && request.resource.data.ownerId == uid()
+        && request.resource.data.memberUids == [uid()]
+        && request.resource.data.hidden == false
+        && request.resource.data.publicRead == false
+        && request.resource.data.inviteEmails.size() == 0
+        && request.resource.data.emailRoles.size() == 0;
+      allow update: if
+        // owner / tree admins: everything except ownership and moderation state
+        (canManageTree(treeId, resource.data) && !changed().hasAny(['ownerId', 'ownerEmail', 'hidden', 'createdAt'])
+          && !('owner' in request.resource.data.emailRoles.values()))
+        // editors: only counters maintained while editing members and media
+        || (canEditTree(treeId, resource.data) && changed().hasOnly(['memberCount', 'storageBytes', 'updatedAt']))
+        // joining through the share link: add yourself after the join document was accepted
+        || (notLocked() && resource.data.hidden == false && changed().hasOnly(['memberUids'])
+          && request.resource.data.memberUids.toSet().difference(resource.data.memberUids.toSet()) == [uid()].toSet()
+          && resource.data.memberUids.toSet().difference(request.resource.data.memberUids.toSet()).size() == 0
+          && existsAfter(joinPath(treeId)))
+        // leaving a tree
+        || (signedIn() && changed().hasOnly(['memberUids'])
+          && resource.data.memberUids.toSet().difference(request.resource.data.memberUids.toSet()) == [uid()].toSet()
+          && request.resource.data.memberUids.toSet().difference(resource.data.memberUids.toSet()).size() == 0
+          && resource.data.ownerId != uid())
+        // moderation
+        || (isAdmin() && changed().hasOnly(['hidden']));
+      allow delete: if notLocked() && (resource.data.ownerId == uid() || isAdmin());
+
+      match /people/{personId} {
+        allow read: if canReadTree(get(treePath(treeId)).data);
+        allow create: if canEditTree(treeId, get(treePath(treeId)).data) && request.resource.data.get('hidden', false) == false;
+        allow update: if (canEditTree(treeId, get(treePath(treeId)).data) && !changed().hasAny(['hidden']))
+          || (isAdmin() && changed().hasOnly(['hidden']));
+        allow delete: if canEditTree(treeId, get(treePath(treeId)).data);
+      }
+      match /{coll}/{docId} {
+        allow read: if coll in ['unions', 'events', 'media'] && canReadTree(get(treePath(treeId)).data);
+        allow write: if coll in ['unions', 'events', 'media'] && canEditTree(treeId, get(treePath(treeId)).data);
+      }
+      // Share-link secret: only owner / tree admins can read or change it.
+      match /private/{docId} {
+        allow read, write: if canManageTree(treeId, get(treePath(treeId)).data);
+      }
+      // One document per person who joined through the share link (doc id = their uid).
+      match /joins/{userId} {
+        allow read: if signedIn() && (uid() == userId || canManageTree(treeId, get(treePath(treeId)).data));
+        allow create: if notLocked() && uid() == userId
+          && get(/databases/$(database)/documents/trees/$(treeId)/private/share).data.enabled == true
+          && get(/databases/$(database)/documents/trees/$(treeId)/private/share).data.token == request.resource.data.token
+          && get(/databases/$(database)/documents/trees/$(treeId)/private/share).data.role == request.resource.data.role
+          && request.resource.data.role in ['viewer', 'editor'];
+        allow update: if canManageTree(treeId, get(treePath(treeId)).data)
+          && request.resource.data.role in ['admin', 'editor', 'viewer'];
+        allow delete: if signedIn() && (uid() == userId || canManageTree(treeId, get(treePath(treeId)).data));
+      }
+    }
+
+    match /reports/{reportId} {
+      allow create: if notLocked() && request.resource.data.reporterUid == uid() && request.resource.data.status == 'open';
+      allow read, update, delete: if isAdmin();
+    }
+  }
+}

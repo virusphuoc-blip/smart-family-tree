@@ -1,0 +1,33 @@
+rules_version = '2';
+
+// Gia Phả Thông Minh — Cloud Storage rules. Files live under trees/{treeId}/{mediaId}/{fileName}.
+// Uses cross-service rules (firestore.get) to check the tree role of the uploader.
+service firebase.storage {
+  match /b/{bucket}/o {
+    function tree(treeId) { return firestore.get(/databases/(default)/documents/trees/$(treeId)).data; }
+    function userDoc() { return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data; }
+    function verified() { return request.auth.token.email_verified == true; }
+    function email() { return request.auth.token.email.lower(); }
+    function isAdmin() {
+      return (verified() && email() == 'virusphuoc@gmail.com') || userDoc().isAdmin == true;
+    }
+    function canRead(t) {
+      return t.ownerId == request.auth.uid || request.auth.uid in t.memberUids
+        || (verified() && email() in t.inviteEmails) || isAdmin();
+    }
+    function canEdit(treeId, t) {
+      return t.ownerId == request.auth.uid
+        || (verified() && email() in t.emailRoles && t.emailRoles[email()] in ['admin', 'editor'])
+        || (request.auth.uid in t.memberUids
+          && firestore.get(/databases/(default)/documents/trees/$(treeId)/joins/$(request.auth.uid)).data.role in ['admin', 'editor'])
+        || isAdmin();
+    }
+
+    match /trees/{treeId}/{mediaId}/{fileName} {
+      // Files are shown through download URLs stored in Firestore (protected by firestore.rules).
+      allow get: if request.auth != null && canRead(tree(treeId));
+      allow create: if request.auth != null && request.resource.size < 200 * 1024 * 1024 && canEdit(treeId, tree(treeId));
+      allow delete: if request.auth != null && canEdit(treeId, tree(treeId));
+    }
+  }
+}

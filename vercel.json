@@ -1,0 +1,4 @@
+{
+  "framework": "vite",
+  "rewrites": [{ "source": "/((?!assets/|fonts/|samples/).*)", "destination": "/index.html" }]
+}
