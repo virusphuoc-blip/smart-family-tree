@@ -153,5 +153,6 @@ check('imported relationships work (Tuấn gọi Phạm Văn Lộc là Ông nộ
 
 // PWA + settings
 await page.goto(base + '/settings')
+await page.waitForSelector('[data-testid=llm-key]')
 check('settings page: AI key field + guest notice', (await page.getByTestId('llm-key').count()) === 1 && (await page.locator('main').innerText()).includes('khách'))
 await done(browser)
