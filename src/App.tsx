@@ -74,6 +74,9 @@ export default function App() {
           <Route path="*" element={<div className="p-8 text-center text-stone-500">Không tìm thấy trang. <Link className="text-brand-700 underline" to="/">Về trang chủ</Link></div>} />
         </Routes>
       </main>
+      <footer className="shrink-0 border-t border-stone-200 bg-white px-3 pt-1 pb-[calc(0.25rem+env(safe-area-inset-bottom))] text-center text-[11px] text-stone-500" data-testid="copyright">
+        © 2026 VH Phước. Mọi nội dung thuộc về VH Phước.
+      </footer>
     </div>
   )
 }

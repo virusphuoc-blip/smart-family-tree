@@ -8,13 +8,21 @@ const out = new URL('./out/', import.meta.url).pathname
 mkdirSync(out, { recursive: true })
 const { browser, page, check, done } = await open(chromium, base)
 
+const footerOk = async () => {
+  const f = page.getByTestId('copyright')
+  const box = await f.boundingBox()
+  return (await f.innerText()).trim() === '© 2026 VH Phước. Mọi nội dung thuộc về VH Phước.' && box && box.y >= 700 && box.y + box.height <= 844.5
+}
 await page.goto(base)
+check('copyright footer visible at the bottom of the home screen', await footerOk())
+check('page title', (await page.title()) === 'Gia Phả Thông Minh - Smart Family Tree')
 await page.getByTestId('load-demo').click()
 await page.waitForSelector('[data-testid=tree-diagram] [data-id]')
 check('demo tree renders 17 member cards', (await page.locator('[data-testid=tree-diagram] [data-id]').count()) === 17)
 check('header shows 3 generations', (await page.locator('header ~ main').innerText()).includes('3 thế hệ'))
 check('UI language is Vietnamese', (await page.locator('html').getAttribute('lang')) === 'vi')
 check('no horizontal overflow at 390px', await page.evaluate(() => document.documentElement.scrollWidth <= 390))
+check('copyright footer visible inside the tree view', await footerOk())
 await page.screenshot({ path: out + 'guest-tree.png' })
 
 // pan + zoom
@@ -155,4 +163,8 @@ check('imported relationships work (Tuấn gọi Phạm Văn Lộc là Ông nộ
 await page.goto(base + '/settings')
 await page.waitForSelector('[data-testid=llm-key]')
 check('settings page: AI key field + guest notice', (await page.getByTestId('llm-key').count()) === 1 && (await page.locator('main').innerText()).includes('khách'))
+check('copyright footer on settings', await footerOk())
+await page.goto(base + '/login')
+await page.waitForSelector('[data-testid=copyright]')
+check('copyright footer on login', await footerOk())
 await done(browser)

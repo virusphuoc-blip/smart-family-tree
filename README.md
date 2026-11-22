@@ -1,6 +1,6 @@
 # Gia Phả Thông Minh · Smart Family Tree
 
-**v1.0.0** — Ứng dụng web miễn phí giúp gia đình Việt tạo, khám phá và chia sẻ cây gia phả tương tác.
+**v1.0.1** — Ứng dụng web miễn phí giúp gia đình Việt tạo, khám phá và chia sẻ cây gia phả tương tác.
 A free web app for Vietnamese families to create, explore and share interactive family trees.
 
 [Tiếng Việt](#tiếng-việt) · [English](#english)
